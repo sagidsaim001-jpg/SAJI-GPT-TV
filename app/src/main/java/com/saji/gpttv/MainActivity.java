@@ -552,7 +552,7 @@ public class MainActivity extends Activity {
                 + "if(oy==='hidden')score-=100000;if(score>best){best=score;target=el;}}"
                 + "window.__sajiScrollTarget=target;}"
                 + "if(target){target.scrollTop+=dir*Math.max(260,Math.floor(target.clientHeight*.68));return 'scrolled';}"
-                + "window.scrollBy(0,dir*Math.max(300,Math.floor(innerHeight*.65));return 'page';"
+                + "window.scrollBy(0,dir*Math.max(300,Math.floor(innerHeight*.65)));return 'page';"
                 + "}catch(e){return 'error';}})()";
         web.evaluateJavascript(js, result -> {
             if (result != null && result.contains("error")) Toast.makeText(this, "Conversation scroll nahi ho saki.", Toast.LENGTH_SHORT).show();

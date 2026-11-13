@@ -4,6 +4,13 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.pm.PackageManager;
+import android.content.Intent;
+import android.speech.RecognizerIntent;
+import android.speech.RecognitionListener;
+import android.speech.SpeechRecognizer;
+import android.os.Handler;
+import android.os.Looper;
+import java.util.ArrayList;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -44,6 +51,10 @@ public class MainActivity extends Activity {
     private boolean railPressed;
     private boolean mobileMode;
     private boolean manualMicPending;
+    private SpeechRecognizer speechRecognizer;
+    private boolean nativeSpeechListening;
+    private Runnable speechTimeoutRunnable;
+    private final Handler speechHandler = new Handler(Looper.getMainLooper());
     private String defaultAgent;
 
     @Override public void onCreate(Bundle state) {
@@ -274,46 +285,280 @@ public class MainActivity extends Activity {
         if(web!=null) web.evaluateJavascript("(function(){try{"+js+"}catch(e){return 'error';}})()",cb);
     }
     private void activateMic() {
-        if(Build.VERSION.SDK_INT>=23&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
-            manualMicPending=true; requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQ_MIC); return;
+        if (!browserOpen || web == null) {
+            Toast.makeText(this, "ChatGPT page pehle open karo.", Toast.LENGTH_SHORT).show();
+            return;
         }
-        runJs("var bs=[].slice.call(document.querySelectorAll('button,[role=button]'));"
-            +"var b=bs.find(x=>{var a=((x.getAttribute('aria-label')||'')+' '+(x.title||'')+' '+(x.innerText||'')).toLowerCase();"
-            +"var r=x.getBoundingClientRect();return r.width>0&&r.height>0&&/dictat|microphone|voice input|start voice/.test(a)&&!/voice mode|advanced voice/.test(a)});"
-            +"if(b){b.click();return 'ok'}return 'not-found';",this::micResult);
+        if (Build.VERSION.SDK_INT >= 23
+                && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            manualMicPending = true;
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC);
+            return;
+        }
+        startNativeSpeechInput();
     }
-    private void micResult(String r){
-        if(r!=null&&r.contains("not-found"))Toast.makeText(this,"ChatGPT ka mic button page par nahi mila. Website se mic select karo.",Toast.LENGTH_LONG).show();
+
+    // Android speech-to-text, as used by the earlier SAJI AI TV app.
+    private void startNativeSpeechInput() {
+        if (web == null || !browserOpen) return;
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Toast.makeText(this, "Is TV Box par speech recognition service available nahi. Google Speech Services check karo.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            stopNativeSpeechInput();
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+            speechRecognizer.setRecognitionListener(new RecognitionListener() {
+                @Override public void onReadyForSpeech(Bundle params) {
+                    nativeSpeechListening = true;
+                    scheduleSpeechTimeout(22000, "Mic sun raha tha lekin speech complete nahi hui. Dobara try karo.");
+                    Toast.makeText(MainActivity.this, "Listening... ab bolo.", Toast.LENGTH_SHORT).show();
+                }
+                @Override public void onBeginningOfSpeech() {
+                    scheduleSpeechTimeout(25000, "Voice recognition timeout. Dobara try karo.");
+                }
+                @Override public void onRmsChanged(float rmsdB) {}
+                @Override public void onBufferReceived(byte[] buffer) {}
+                @Override public void onEndOfSpeech() {
+                    nativeSpeechListening = false;
+                    scheduleSpeechTimeout(14000, "Speech text mein convert nahi hui. Network ya Speech Services check karo.");
+                    Toast.makeText(MainActivity.this, "Awaaz mil gayi, text ban raha hai...", Toast.LENGTH_SHORT).show();
+                }
+                @Override public void onError(int error) {
+                    nativeSpeechListening = false;
+                    stopNativeSpeechInput();
+                    String message = error == SpeechRecognizer.ERROR_NO_MATCH
+                            ? "Awaaz clear nahi mili. Mic ke paas bolkar dobara try karo."
+                            : error == SpeechRecognizer.ERROR_NETWORK || error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT
+                            ? "Speech service ka network slow ya unavailable hai."
+                            : error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
+                            ? "Android microphone permission allow karo."
+                            : error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY
+                            ? "Speech service busy hai. 2 second baad try karo."
+                            : "Speech recognition ruk gayi. TV ki Speech Services check karo.";
+                    Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                }
+                @Override public void onResults(Bundle results) {
+                    nativeSpeechListening = false;
+                    ArrayList<String> matches = results == null ? null : results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    String transcript = matches == null || matches.isEmpty() ? "" : matches.get(0);
+                    stopNativeSpeechInput();
+                    if (transcript.trim().isEmpty()) {
+                        Toast.makeText(MainActivity.this, "Koi text recognize nahi hua. Dobara bolo.", Toast.LENGTH_LONG).show();
+                    } else {
+                        insertTranscriptIntoComposer(transcript.trim());
+                    }
+                }
+                @Override public void onPartialResults(Bundle partialResults) {}
+                @Override public void onEvent(int eventType, Bundle params) {}
+            });
+            Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ur-PK");
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ur-PK");
+            intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+            intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+            intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
+            scheduleSpeechTimeout(15000, "Mic start nahi hua. TV ki Speech Services ya microphone permission check karo.");
+            speechRecognizer.startListening(intent);
+        } catch (Throwable error) {
+            stopNativeSpeechInput();
+            Toast.makeText(this, "Speech service start nahi hui. TV par Google Speech Services check karo.", Toast.LENGTH_LONG).show();
+        }
     }
-    private void activateLive(){
-        runJs("var bs=[].slice.call(document.querySelectorAll('button,[role=button]'));"
-            +"var b=bs.find(x=>{var a=((x.getAttribute('aria-label')||'')+' '+(x.title||'')+' '+(x.innerText||'')).toLowerCase();"
-            +"var r=x.getBoundingClientRect();return r.width>0&&r.height>0&&/voice mode|start voice|advanced voice|voice conversation/.test(a)});"
-            +"if(b){b.click();return 'ok'}return 'not-found';",r->{if(r!=null&&r.contains("not-found"))Toast.makeText(this,"ChatGPT Voice button page par available nahi mila.",Toast.LENGTH_SHORT).show();});
+
+    private void scheduleSpeechTimeout(long delayMs, String message) {
+        if (speechTimeoutRunnable != null) speechHandler.removeCallbacks(speechTimeoutRunnable);
+        speechTimeoutRunnable = () -> {
+            if (speechRecognizer != null) {
+                stopNativeSpeechInput();
+                Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+            }
+        };
+        speechHandler.postDelayed(speechTimeoutRunnable, delayMs);
     }
-    private void readLatest(){
-        runJs("var ms=[].slice.call(document.querySelectorAll('[data-message-author-role=assistant]'));"
-            +"if(!ms.length)return 'no-reply';var m=ms[ms.length-1];var scope=m.closest('article')||m.parentElement||document;"
-            +"var bs=[].slice.call(scope.querySelectorAll('button,[role=button]'));"
-            +"var b=bs.find(x=>/read aloud|read response|voice-play-turn-action-button|stop reading/i.test((x.getAttribute('aria-label')||'')+' '+(x.title||'')+' '+(x.getAttribute('data-testid')||'')));"
-            +"if(b){b.click();return 'ok'}return 'not-found';",r->{if(r!=null&&r.contains("not-found"))Toast.makeText(this,"Reply ka Read Aloud button nahi mila.",Toast.LENGTH_SHORT).show();});
+
+    private void stopNativeSpeechInput() {
+        nativeSpeechListening = false;
+        if (speechTimeoutRunnable != null) {
+            speechHandler.removeCallbacks(speechTimeoutRunnable);
+            speechTimeoutRunnable = null;
+        }
+        SpeechRecognizer recognizer = speechRecognizer;
+        speechRecognizer = null;
+        if (recognizer != null) {
+            try { recognizer.cancel(); } catch (Throwable ignored) {}
+            try { recognizer.destroy(); } catch (Throwable ignored) {}
+        }
     }
-    private void sendMessage(){
-        runJs("var e=document.querySelector('textarea#prompt-textarea,[contenteditable=true][role=textbox],[role=textbox],textarea');"
-            +"if(!e)return 'empty';var t=(e.innerText||e.value||'').trim();if(!t)return 'empty';"
-            +"var f=e.closest('form');var bs=[].slice.call(document.querySelectorAll('button,[role=button]'));"
-            +"var b=bs.find(x=>{var a=((x.getAttribute('aria-label')||'')+' '+(x.getAttribute('data-testid')||'')+' '+(x.title||'')).toLowerCase();"
-            +"return /send|submit/.test(a)&&!x.disabled&&x.getAttribute('aria-disabled')!=='true'});"
-            +"if(b){b.click();return 'sent'}if(f&&f.requestSubmit){f.requestSubmit();return 'sent'}return 'missing';",
-            r->{if(r!=null&&r.contains("empty"))Toast.makeText(this,"Pehle message type karo.",Toast.LENGTH_SHORT).show();});
+
+    private void insertTranscriptIntoComposer(String transcript) {
+        if (web == null || !browserOpen) return;
+        final String quoted;
+        try { quoted = org.json.JSONObject.quote(transcript); }
+        catch (Throwable error) {
+            Toast.makeText(this, "Transcript prepare nahi ho saka.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String js = "(function(){try{"
+                + "var text=" + quoted + ";"
+                + "var selectors=['textarea#prompt-textarea','[data-testid*=composer] [contenteditable=true]',"
+                + "'[contenteditable=true][role=textbox]','[role=textbox]','textarea','[contenteditable=true]'];"
+                + "var el=null,best=-1;"
+                + "for(var i=0;i<selectors.length;i++){var list=document.querySelectorAll(selectors[i]);"
+                + "for(var j=list.length-1;j>=0;j--){var n=list[j],r=n.getBoundingClientRect();"
+                + "if(r.width<=0||r.height<=0||n.disabled||n.readOnly)continue;"
+                + "var score=1+(n.id==='prompt-textarea'?100:0)"
+                + "+((n.getAttribute('data-testid')||'').indexOf('composer')>=0?50:0)"
+                + "+(n.getAttribute('role')==='textbox'?20:0);"
+                + "if(score>best){best=score;el=n;}}}"
+                + "if(!el)return 'missing';el.focus();"
+                + "var edit=el.isContentEditable||el.getAttribute('contenteditable')==='true';"
+                + "if(edit){var ok=false;try{ok=document.execCommand('insertText',false,text);}catch(e){}"
+                + "if(!ok){var old=el.innerText||el.textContent||'';el.textContent=(old?old+' ':'')+text;}"
+                + "}else{var proto=el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;"
+                + "var desc=Object.getOwnPropertyDescriptor(proto,'value');"
+                + "if(desc&&desc.set)desc.set.call(el,(el.value?el.value+' ':'')+text);else el.value=(el.value?el.value+' ':'')+text;}"
+                + "try{el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:text}));}"
+                + "catch(e){el.dispatchEvent(new Event('input',{bubbles:true}));}"
+                + "el.dispatchEvent(new Event('change',{bubbles:true}));return 'ok';"
+                + "}catch(e){return 'error';}})()";
+        web.evaluateJavascript(js, result -> {
+            if (result != null && result.contains("ok")) {
+                Toast.makeText(this, "Tumhari awaaz ka text message box mein aa gaya. Ab SEND dabao.", Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "Voice text mila, lekin ChatGPT ka message box nahi mila. Page reload karke try karo.", Toast.LENGTH_LONG).show();
+            }
+        });
     }
-    private void scroll(int dir){
-        runJs("var dir="+dir+";var t=window.__sajiScrollTarget;"
-            +"if(!t||!t.isConnected||t.scrollHeight<=t.clientHeight+20){t=null;var ns=document.querySelectorAll('main,[role=main],[class*=conversation],[class*=scroll],div,section');var best=-1;"
-            +"for(var i=0;i<ns.length;i++){var e=ns[i],r=e.getBoundingClientRect();if(r.width<100||r.height<100||e.scrollHeight<=e.clientHeight+20)continue;"
-            +"var c=((e.className||'')+'').toLowerCase();var score=Math.min(r.width,innerWidth)*Math.min(r.height,innerHeight)+( /main|conversation|scroll/.test(c)?500000:0);if(score>best){best=score;t=e}}window.__sajiScrollTarget=t}"
-            +"if(t){t.scrollTop+=dir*Math.max(280,Math.floor(t.clientHeight*.7));return 'ok'}window.scrollBy(0,dir*Math.max(300,innerHeight*.65));return 'page';",null);
+
+    private void activateLive() {
+        if (!browserOpen || web == null) {
+            Toast.makeText(this, "ChatGPT page pehle open karo.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        tryActivateLiveVoice(0);
     }
+
+    private void tryActivateLiveVoice(int attempt) {
+        if (web == null || !browserOpen) return;
+        if (attempt >= 9) {
+            Toast.makeText(this, "ChatGPT Live Voice control detect nahi hua. Page reload karke dobara try karo.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String js = "(function(){try{"
+                + "var all=[].slice.call(document.querySelectorAll('button,[role=button]'));"
+                + "var visible=function(b){var r=b.getBoundingClientRect(),st=getComputedStyle(b);"
+                + "return r.width>0&&r.height>0&&st.visibility!=='hidden'&&st.display!=='none'&&!b.disabled&&b.getAttribute('aria-disabled')!=='true';};"
+                + "var label=function(b){return ((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')+' '+"
+                + "(b.getAttribute('data-testid')||'')+' '+(b.innerText||b.textContent||'')).toLowerCase().replace(/[-_]/g,' ');};"
+                + "var blocked=/dictat|microphone|record|mute|unmute|stop voice|end voice|close voice/;"
+                + "var candidates=all.filter(function(b){var a=label(b);return visible(b)&&!blocked.test(a)"
+                + "&&/(voice mode|start voice|voice conversation|voice chat|voice-mode)/.test(a);});"
+                + "if(candidates.length){candidates[candidates.length-1].click();return 'clicked';}"
+                + "var composer=document.querySelector('[data-testid*=composer]')||document.querySelector('form');"
+                + "if(composer){var near=all.filter(function(b){var a=label(b),r=b.getBoundingClientRect();"
+                + "return composer.contains(b)&&visible(b)&&!blocked.test(a)&&a.trim()==='voice'&&r.bottom>innerHeight*.55;});"
+                + "if(near.length){near[near.length-1].click();return 'clicked';}}"
+                + "return 'waiting';}catch(e){return 'error';}})()";
+        web.evaluateJavascript(js, result -> {
+            if (result != null && result.contains("clicked")) {
+                Toast.makeText(this, "ChatGPT Live Voice start kiya.", Toast.LENGTH_SHORT).show();
+            } else {
+                speechHandler.postDelayed(() -> tryActivateLiveVoice(attempt + 1), 800);
+            }
+        });
+    }
+
+    private void readLatest() { readLatestAttempt(0); }
+
+    private void readLatestAttempt(int attempt) {
+        if (web == null || !browserOpen) return;
+        String js = "(function(){try{"
+                + "var messages=[].slice.call(document.querySelectorAll('[data-message-author-role=assistant]'));"
+                + "if(!messages.length)return 'no-reply';var latest=messages[messages.length-1];"
+                + "var scope=latest.closest('[data-testid*=conversation-turn]')||latest.closest('article')||latest.parentElement||document;"
+                + "var label=function(b){return ((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')+' '+"
+                + "(b.getAttribute('data-testid')||'')+' '+(b.innerText||b.textContent||'')).toLowerCase();};"
+                + "var visible=function(b){var r=b.getBoundingClientRect(),st=getComputedStyle(b);"
+                + "return r.width>0&&r.height>0&&st.visibility!=='hidden'&&st.display!=='none';};"
+                + "var match=[].slice.call(scope.querySelectorAll('button,[role=button]')).filter(function(b){"
+                + "return visible(b)&&/read\\\\s*aloud|read\\\\s*response|voice-play-turn-action-button|stop\\\\s*reading/.test(label(b));});"
+                + "if(!match.length){match=[].slice.call(document.querySelectorAll('button,[role=button]')).filter(function(b){"
+                + "return visible(b)&&/read\\\\s*aloud|voice-play-turn-action-button|stop\\\\s*reading/.test(label(b));});}"
+                + "if(!match.length)return 'not-found';match[match.length-1].click();return 'clicked';"
+                + "}catch(e){return 'error';}})()";
+        web.evaluateJavascript(js, result -> {
+            if (result != null && result.contains("clicked")) {
+                Toast.makeText(this, "ChatGPT Read Aloud start ho gaya.", Toast.LENGTH_SHORT).show();
+            } else if (attempt < 3) {
+                speechHandler.postDelayed(() -> readLatestAttempt(attempt + 1), 450);
+            } else {
+                Toast.makeText(this, "Latest reply ka Read Aloud control nahi mila.", Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void sendMessage() {
+        if (web == null || !browserOpen) return;
+        String js = "(function(){try{"
+                + "var selectors=['textarea#prompt-textarea','[data-testid*=composer] [contenteditable=true]',"
+                + "'[contenteditable=true][role=textbox]','[role=textbox]','textarea','[contenteditable=true]'];"
+                + "var editor=null;"
+                + "for(var i=0;i<selectors.length&&!editor;i++){var list=document.querySelectorAll(selectors[i]);"
+                + "for(var j=list.length-1;j>=0;j--){var n=list[j],r=n.getBoundingClientRect();"
+                + "var t=(n.innerText||n.textContent||n.value||'').trim();"
+                + "if(r.width>0&&r.height>0&&!n.disabled&&!n.readOnly&&t){editor=n;break;}}}"
+                + "if(!editor)return 'empty';var form=editor.closest('form');"
+                + "var buttons=[].slice.call((form||document).querySelectorAll('button,[role=button]'));"
+                + "var best=null,bestScore=0;"
+                + "buttons.forEach(function(b){var r=b.getBoundingClientRect();"
+                + "if(r.width<=0||r.height<=0||b.disabled||b.getAttribute('aria-disabled')==='true')return;"
+                + "var a=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||'')+' '+"
+                + "(b.getAttribute('title')||'')+' '+(b.innerText||b.textContent||'')).toLowerCase();"
+                + "var score=0;if(/send-button|send prompt/.test(a))score+=20;if(/send|submit/.test(a))score+=10;"
+                + "if(/stop|voice|microphone|attach|dictat/.test(a))score-=15;"
+                + "if(score>bestScore){best=b;bestScore=score;}});"
+                + "if(best&&bestScore>=10){best.click();return 'sent';}"
+                + "if(form&&typeof form.requestSubmit==='function'){form.requestSubmit();return 'sent';}"
+                + "return 'button-missing';}catch(e){return 'error';}})()";
+        web.evaluateJavascript(js, result -> {
+            if (result != null && result.contains("sent")) {
+                Toast.makeText(this, "Message ChatGPT ko send kar diya.", Toast.LENGTH_SHORT).show();
+            } else if (result != null && result.contains("empty")) {
+                Toast.makeText(this, "Pehle message box mein text likho ya MIC se bolo.", Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "Send control detect nahi hua. Message box mein text check karo.", Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void scroll(int dir) {
+        if (web == null || !browserOpen) return;
+        String js = "(function(){try{"
+                + "var dir=" + (dir < 0 ? "-1" : "1") + ";"
+                + "var target=window.__sajiScrollTarget;"
+                + "if(!target||!target.isConnected||target.scrollHeight<=target.clientHeight+30){"
+                + "target=null;var active=document.activeElement,best=-1;"
+                + "var nodes=document.querySelectorAll('main,[role=main],[data-testid*=conversation],[class*=conversation],[class*=chat],[class*=scroll],div,section');"
+                + "for(var i=0;i<nodes.length;i++){var el=nodes[i];"
+                + "if(!el||el===document.body||el===document.documentElement)continue;"
+                + "var r=el.getBoundingClientRect();"
+                + "if(r.width<100||r.height<100||r.bottom<0||r.top>innerHeight)continue;"
+                + "if(el.scrollHeight<=el.clientHeight+30)continue;"
+                + "var st=getComputedStyle(el),oy=st.overflowY||'',cl=((el.className||'')+'').toLowerCase();"
+                + "var semantic=el.tagName==='MAIN'||el.getAttribute('role')==='main'||/conversation|chat|scroll/.test(cl);"
+                + "var score=Math.min(r.width,innerWidth)*Math.min(r.height,innerHeight)+(semantic?500000:0)+(active&&el.contains(active)?200000:0);"
+                + "if(oy==='hidden')score-=100000;if(score>best){best=score;target=el;}}"
+                + "window.__sajiScrollTarget=target;}"
+                + "if(target){target.scrollTop+=dir*Math.max(260,Math.floor(target.clientHeight*.68));return 'scrolled';}"
+                + "window.scrollBy(0,dir*Math.max(300,Math.floor(innerHeight*.65));return 'page';"
+                + "}catch(e){return 'error';}})()";
+        web.evaluateJavascript(js, result -> {
+            if (result != null && result.contains("error")) Toast.makeText(this, "Conversation scroll nahi ho saki.", Toast.LENGTH_SHORT).show();
+        });
+    }
+
     private void showMicSettings(){
         boolean granted=Build.VERSION.SDK_INT<23||checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED;
         new AlertDialog.Builder(this).setTitle("SAJI GPT • MICROPHONE")
@@ -348,23 +593,40 @@ public class MainActivity extends Activity {
     }
     @Override public void onRequestPermissionsResult(int code,String[] p,int[] g){
         super.onRequestPermissionsResult(code,p,g);
-        if(code==REQ_MIC&&pendingPermission!=null){
-            if(g.length>0&&g[0]==PackageManager.PERMISSION_GRANTED)pendingPermission.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
-            else pendingPermission.deny();
-            pendingPermission=null;
+        if(code==REQ_MIC){
+            boolean granted=g!=null&&g.length>0&&g[0]==PackageManager.PERMISSION_GRANTED;
+            if(pendingPermission!=null){
+                PermissionRequest request=pendingPermission;
+                pendingPermission=null;
+                try { if(granted) request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE}); else request.deny(); }
+                catch(Throwable ignored) { }
+            }
+            if(manualMicPending){
+                manualMicPending=false;
+                if(granted) startNativeSpeechInput();
+                else Toast.makeText(this,"Microphone permission allow nahi hui.",Toast.LENGTH_LONG).show();
+            }
         }
     }
+
     @Override protected void onResume(){super.onResume();enterImmersive();if(web!=null)web.onResume();}
-    @Override protected void onPause(){if(web!=null)web.onPause();super.onPause();}
+    @Override protected void onPause(){
+        stopNativeSpeechInput();
+        if(web!=null)web.onPause();
+        super.onPause();
+    }
     @Override protected void onDestroy(){
-        if(pendingPermission!=null){pendingPermission.deny();pendingPermission=null;}
+        stopNativeSpeechInput();
+        speechHandler.removeCallbacksAndMessages(null);
+        if(pendingPermission!=null){try{pendingPermission.deny();}catch(Throwable ignored){}pendingPermission=null;}
         if(web!=null){
             try { web.stopLoading(); web.setWebChromeClient(null); web.setWebViewClient(null); web.destroy(); }
-            catch (Throwable ignored) { }
+            catch(Throwable ignored) { }
             web=null;
         }
         super.onDestroy();
     }
+
     private int dp(float v){return (int)(v*getResources().getDisplayMetrics().density+.5f);}
 
     private class Icon extends View {

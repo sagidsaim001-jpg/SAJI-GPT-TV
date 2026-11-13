@@ -140,7 +140,7 @@ public class MainActivity extends Activity {
         addToRail(back); addToRail(mic); addToRail(live); addToRail(speak);
         addToRail(send); addToRail(up); addToRail(down); addToRail(site); addToRail(mobile);
         settingsButton=new TextView(this);
-        settingsButton.setText("⚙\\nSETTINGS");
+        settingsButton.setText("⚙\nSETTINGS");
         settingsButton.setTextColor(0xFFE7ECFF);
         settingsButton.setTextSize(8);
         settingsButton.setTypeface(Typeface.DEFAULT_BOLD);

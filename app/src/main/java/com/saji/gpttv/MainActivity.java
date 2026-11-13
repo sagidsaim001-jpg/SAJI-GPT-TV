@@ -45,6 +45,7 @@ public class MainActivity extends Activity {
     private FrameLayout root;
     private LinearLayout rail;
     private WebView web;
+    private boolean browserOpen = true;
     private PermissionRequest pendingPermission;
     private View back, mic, live, speak, send, up, down, site, mobile;
     private TextView exit;

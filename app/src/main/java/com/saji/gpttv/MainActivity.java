@@ -139,6 +139,19 @@ public class MainActivity extends Activity {
 
         addToRail(back); addToRail(mic); addToRail(live); addToRail(speak);
         addToRail(send); addToRail(up); addToRail(down); addToRail(site); addToRail(mobile);
+        settingsButton=new TextView(this);
+        settingsButton.setText("⚙\\nSETTINGS");
+        settingsButton.setTextColor(0xFFE7ECFF);
+        settingsButton.setTextSize(8);
+        settingsButton.setTypeface(Typeface.DEFAULT_BOLD);
+        settingsButton.setGravity(Gravity.CENTER);
+        settingsButton.setFocusable(true); settingsButton.setFocusableInTouchMode(true); settingsButton.setClickable(true);
+        settingsButton.setId(View.generateViewId());
+        settingsButton.setBackground(buttonBg(false,0xFF9B8CFF));
+        settingsButton.setContentDescription("SETTINGS");
+        settingsButton.setOnFocusChangeListener((v,focused)->focusStyle(v,focused,0xFF9B8CFF));
+        settingsButton.setOnClickListener(v->showSettingsMenu());
+        addToRail(settingsButton);
 
         back.setOnClickListener(v -> goBack());
         mic.setOnClickListener(v -> activateMic());
@@ -150,21 +163,13 @@ public class MainActivity extends Activity {
         site.setOnClickListener(v -> showMicSettings());
         mobile.setOnClickListener(v -> toggleLayout());
 
-        View[] order={back,mic,live,speak,send,up,down,site,mobile};
+        View[] order={back,mic,live,speak,send,up,down,site,mobile,settingsButton};
         for(int i=0;i<order.length;i++){
             View v=order[i];
             v.setNextFocusUpId(order[Math.max(0,i-1)].getId());
             v.setNextFocusDownId(order[Math.min(order.length-1,i+1)].getId());
             v.setNextFocusRightId(View.NO_ID);
         }
-        settingsButton=new TextView(this);
-        settingsButton.setText("⚙"); settingsButton.setTextColor(Color.WHITE); settingsButton.setTextSize(22);
-        settingsButton.setGravity(Gravity.CENTER); settingsButton.setFocusable(true); settingsButton.setClickable(true);
-        settingsButton.setId(View.generateViewId()); settingsButton.setBackground(buttonBg(false,0xFF9B8CFF));
-        FrameLayout.LayoutParams sp=new FrameLayout.LayoutParams(dp(42),dp(38),Gravity.TOP|Gravity.END);
-        sp.topMargin=dp(12); sp.rightMargin=dp(94); root.addView(settingsButton,sp);
-        settingsButton.setOnFocusChangeListener((v,focused)->focusStyle(v,focused,0xFF9B8CFF));
-        settingsButton.setOnClickListener(v->showSettingsMenu());
         exit=new TextView(this);
         exit.setText("EXIT  ×");
         exit.setTextColor(Color.WHITE);
@@ -180,9 +185,10 @@ public class MainActivity extends Activity {
         root.addView(exit,ep);
         exit.setOnFocusChangeListener((v,f)->focusStyle(v,f,0xFFB9C8F8));
         exit.setOnClickListener(v -> finish());
-        exit.setNextFocusDownId(back.getId()); settingsButton.setNextFocusDownId(back.getId());
-        settingsButton.setNextFocusRightId(exit.getId()); exit.setNextFocusLeftId(settingsButton.getId());
-        back.setNextFocusRightId(settingsButton.getId());
+        exit.setNextFocusDownId(back.getId());
+        settingsButton.setNextFocusRightId(exit.getId());
+        exit.setNextFocusLeftId(settingsButton.getId());
+        back.setNextFocusRightId(exit.getId());
     }
 
     private void addToRail(View v) {

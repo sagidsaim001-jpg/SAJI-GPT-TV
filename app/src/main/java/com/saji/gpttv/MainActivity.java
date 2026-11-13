@@ -606,11 +606,34 @@ public class MainActivity extends Activity {
     private boolean hasAndroidMicPermission(){return Build.VERSION.SDK_INT<23||checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED;}
     private boolean isChatGptWebsiteMicAllowed(){return getPreferences(MODE_PRIVATE).getBoolean(PREF_CHATGPT_MIC,false);}
     private void showSettingsMenu(){
-        String[] items={"MICROPHONE PERMISSIONS","ANDROID APP PERMISSIONS","OPEN ANDROID APP SETTINGS","TEST MICROPHONE"};
+        String[] items={"CHATGPT WEBSITE MICROPHONE","ANDROID APP MICROPHONE","OPEN ANDROID APP SETTINGS","TEST MICROPHONE"};
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("SAJI GPT SETTINGS").setItems(items,(d,w)->{
-            if(w==0)showMicSettings();else if(w==1)showAndroidPermissionStatus();else if(w==2)openAndroidAppSettings();else activateMic();
+            if(w==0)showWebsiteMicPermissionSettings();else if(w==1)showAndroidPermissionStatus();else if(w==2)openAndroidAppSettings();else activateMic();
         }).setNegativeButton("CLOSE",null).create();
         dialog.setOnShowListener(v->{if(dialog.getListView()!=null)dialog.getListView().requestFocus();});dialog.show();
+    }
+    private void showWebsiteMicPermissionSettings(){
+        boolean allowed=isChatGptWebsiteMicAllowed();
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("CHATGPT WEBSITE MICROPHONE")
+            .setMessage("Website auto-allow: "+(allowed?"ON":"OFF")+
+                "\\nAndroid app permission: "+(hasAndroidMicPermission()?"ALLOWED":"BLOCKED")+
+                "\\n\\nALLOW WEBSITE MIC select karne ke baad, jab ChatGPT website microphone request karegi, SAJI GPT us request ko automatically allow karega. Actual website permission ChatGPT ke MIC ya Live button dabane par request aane ke waqt grant hoti hai.")
+            .setPositiveButton(allowed?"AUTO-ALLOW IS ON":"ALLOW WEBSITE MIC",(d,w)->{
+                if(!hasAndroidMicPermission()){
+                    pendingSettingsMicEnable=true;
+                    requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQ_MIC);
+                    return;
+                }
+                getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_CHATGPT_MIC,true).apply();
+                Toast.makeText(this,"Website microphone auto-allow ON. Ab ChatGPT ke andar MIC ya Live dabao.",Toast.LENGTH_LONG).show();
+                if(web!=null)web.reload();
+            })
+            .setNeutralButton("BLOCK WEBSITE MIC",(d,w)->{
+                getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_CHATGPT_MIC,false).apply();
+                if(pendingPermission!=null){try{pendingPermission.deny();}catch(Throwable ignored){}pendingPermission=null;}
+                Toast.makeText(this,"ChatGPT website mic auto-allow OFF.",Toast.LENGTH_LONG).show();
+            }).setNegativeButton("CLOSE",null).create();
+        dialog.show();
     }
     private void showAndroidPermissionStatus(){
         boolean allowed=hasAndroidMicPermission();
@@ -625,23 +648,7 @@ public class MainActivity extends Activity {
         try{startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,android.net.Uri.parse("package:"+getPackageName())));}
         catch(Throwable error){try{startActivity(new Intent(Settings.ACTION_SETTINGS));}catch(Throwable ignored){Toast.makeText(this,"Android Settings open nahi hui.",Toast.LENGTH_LONG).show();}}
     }
-    private void showMicSettings(){
-        boolean androidAllowed=hasAndroidMicPermission(),siteAllowed=isChatGptWebsiteMicAllowed();
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("CHATGPT MICROPHONE")
-            .setMessage("Android app permission: "+(androidAllowed?"ALLOWED":"BLOCKED")+
-                "\nChatGPT website permission: "+(siteAllowed?"ALLOWED":"BLOCKED")+
-                "\n\nDono ON hone chahiye. Allow ke baad ChatGPT page reload karke Live/MIC try karo.")
-            .setPositiveButton("ALLOW MICROPHONE",(d,w)->{
-                pendingSettingsMicEnable=true;
-                if(!hasAndroidMicPermission())requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQ_MIC);
-                else{getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_CHATGPT_MIC,true).apply();pendingSettingsMicEnable=false;Toast.makeText(this,"ChatGPT website microphone allowed. Page reload karke try karo.",Toast.LENGTH_LONG).show();}
-            })
-            .setNeutralButton("BLOCK WEBSITE MIC",(d,w)->{
-                getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_CHATGPT_MIC,false).apply();
-                if(pendingPermission!=null){try{pendingPermission.deny();}catch(Throwable ignored){}pendingPermission=null;}
-                Toast.makeText(this,"ChatGPT website microphone blocked.",Toast.LENGTH_SHORT).show();
-            }).setNegativeButton("ANDROID SETTINGS",(d,w)->openAndroidAppSettings()).create();dialog.show();
-    }
+    private void showMicSettings(){showWebsiteMicPermissionSettings();}
     private void handleWebsiteMicRequest(PermissionRequest request){
         if(request==null)return;boolean audio=false,unsupported=false;
         String[] resources=request.getResources();if(resources!=null)for(String resource:resources){if(PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource))audio=true;else unsupported=true;}

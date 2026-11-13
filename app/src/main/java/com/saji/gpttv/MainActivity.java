@@ -42,7 +42,8 @@ public class MainActivity extends Activity {
     private View back, mic, live, speak, send, up, down, site, mobile;
     private TextView exit;
     private boolean railPressed;
-    private boolean mobileMode;\n    private boolean manualMicPending;
+    private boolean mobileMode;
+    private boolean manualMicPending;
     private String defaultAgent;
 
     @Override public void onCreate(Bundle state) {
@@ -234,7 +235,12 @@ public class MainActivity extends Activity {
         FrameLayout.LayoutParams wp=new FrameLayout.LayoutParams(-1,-1);
         wp.leftMargin=dp(82);
         root.addView(web,0,wp);
-        web.setNextFocusLeftId(mobile.getId());\n        back.setNextFocusRightId(web.getId()); mic.setNextFocusRightId(web.getId());\n        live.setNextFocusRightId(web.getId()); speak.setNextFocusRightId(web.getId());\n        send.setNextFocusRightId(web.getId()); up.setNextFocusRightId(web.getId());\n        down.setNextFocusRightId(web.getId()); site.setNextFocusRightId(web.getId());\n        mobile.setNextFocusRightId(web.getId());
+        web.setNextFocusLeftId(mobile.getId());
+        back.setNextFocusRightId(web.getId()); mic.setNextFocusRightId(web.getId());
+        live.setNextFocusRightId(web.getId()); speak.setNextFocusRightId(web.getId());
+        send.setNextFocusRightId(web.getId()); up.setNextFocusRightId(web.getId());
+        down.setNextFocusRightId(web.getId()); site.setNextFocusRightId(web.getId());
+        mobile.setNextFocusRightId(web.getId());
     }
 
     private void runJs(String js, android.webkit.ValueCallback<String> cb) {

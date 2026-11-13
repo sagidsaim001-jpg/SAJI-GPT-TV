@@ -48,26 +48,52 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        enterImmersive();
-        buildUi();
-        buildWebView();
-        web.loadUrl(HOME_URL);
-        web.requestFocus();
+        try {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            enterImmersive();
+            buildUi();
+            buildWebView();
+            web.loadUrl(HOME_URL);
+            web.requestFocus();
+        } catch (Throwable error) {
+            showStartupError(error);
+        }
     }
 
     private void enterImmersive() {
-        Window w=getWindow();
-        w.setStatusBarColor(Color.TRANSPARENT);
-        w.setNavigationBarColor(Color.TRANSPARENT);
-        if (Build.VERSION.SDK_INT>=30) {
-            w.setDecorFitsSystemWindows(false);
-            WindowInsetsController c=w.getInsetsController();
-            if(c!=null){c.hide(WindowInsets.Type.statusBars()|WindowInsets.Type.navigationBars());
-                c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);}
-        } else {
-            w.getDecorView().setSystemUiVisibility(5894|1024|512|4096);
+        try {
+            Window w=getWindow();
+            w.setStatusBarColor(Color.TRANSPARENT);
+            w.setNavigationBarColor(Color.TRANSPARENT);
+            if (Build.VERSION.SDK_INT>=30) {
+                w.setDecorFitsSystemWindows(false);
+                WindowInsetsController c=w.getInsetsController();
+                if(c!=null){c.hide(WindowInsets.Type.statusBars()|WindowInsets.Type.navigationBars());
+                    c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);}
+            } else {
+                w.getDecorView().setSystemUiVisibility(5894|1024|512|4096);
+            }
+        } catch (Throwable ignored) {
+            try { getWindow().getDecorView().setSystemUiVisibility(5894|1024|512|4096); }
+            catch (Throwable ignoredAgain) { }
         }
+    }
+
+    private void showStartupError(Throwable error) {
+        String detail=error.getClass().getSimpleName();
+        if(error.getMessage()!=null) detail += "\\n" + error.getMessage();
+        TextView message=new TextView(this);
+        message.setText("SAJI GPT STARTUP ERROR\\n\\n"+detail+
+            "\\n\\nAndroid System WebView ya device compatibility issue ho sakta hai.\\n"+
+            "Is screen ka screenshot bhejo, error identify kar lenge.");
+        message.setTextColor(Color.WHITE);
+        message.setTextSize(18);
+        message.setGravity(Gravity.CENTER);
+        message.setPadding(dp(28),dp(28),dp(28),dp(28));
+        message.setBackgroundColor(0xFF070B16);
+        message.setFocusable(true);
+        message.setOnClickListener(v -> recreate());
+        setContentView(message);
     }
 
     private void buildUi() {
@@ -200,6 +226,7 @@ public class MainActivity extends Activity {
 
     private void buildWebView() {
         web=new WebView(this);
+        web.setId(View.generateViewId());
         web.setBackgroundColor(0xFF070B16);
         web.setFocusable(true); web.setFocusableInTouchMode(true);
         WebSettings s=web.getSettings();
@@ -331,7 +358,11 @@ public class MainActivity extends Activity {
     @Override protected void onPause(){if(web!=null)web.onPause();super.onPause();}
     @Override protected void onDestroy(){
         if(pendingPermission!=null){pendingPermission.deny();pendingPermission=null;}
-        if(web!=null){web.stopLoading();web.loadUrl("about:blank");web.setWebChromeClient(null);web.setWebViewClient(null);web.destroy();web=null;}
+        if(web!=null){
+            try { web.stopLoading(); web.setWebChromeClient(null); web.setWebViewClient(null); web.destroy(); }
+            catch (Throwable ignored) { }
+            web=null;
+        }
         super.onDestroy();
     }
     private int dp(float v){return (int)(v*getResources().getDisplayMetrics().density+.5f);}

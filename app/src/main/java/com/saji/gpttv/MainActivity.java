@@ -443,30 +443,48 @@ public class MainActivity extends Activity {
 
     private void tryActivateLiveVoice(int attempt) {
         if (web == null || !browserOpen) return;
-        if (attempt >= 9) {
-            Toast.makeText(this, "ChatGPT Live Voice control detect nahi hua. Page reload karke dobara try karo.", Toast.LENGTH_LONG).show();
+        if (attempt >= 8) {
+            Toast.makeText(this, "ChatGPT ka blue Live Voice button nahi mila. Page reload karke dobara try karo.", Toast.LENGTH_LONG).show();
             return;
         }
+        // Prefer ChatGPT's accessible labels. Fallback: select the rightmost
+        // visible action in the composer, which is the blue waveform control.
         String js = "(function(){try{"
-                + "var all=[].slice.call(document.querySelectorAll('button,[role=button]'));"
+                + "var bs=[].slice.call(document.querySelectorAll('button,[role=button]'));"
                 + "var visible=function(b){var r=b.getBoundingClientRect(),st=getComputedStyle(b);"
-                + "return r.width>0&&r.height>0&&st.visibility!=='hidden'&&st.display!=='none'&&!b.disabled&&b.getAttribute('aria-disabled')!=='true';};"
-                + "var label=function(b){return ((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')+' '+"
-                + "(b.getAttribute('data-testid')||'')+' '+(b.innerText||b.textContent||'')).toLowerCase().replace(/[-_]/g,' ');};"
-                + "var blocked=/dictat|microphone|record|mute|unmute|stop voice|end voice|close voice/;"
-                + "var candidates=all.filter(function(b){var a=label(b);return visible(b)&&!blocked.test(a)"
-                + "&&/(voice mode|start voice|voice conversation|voice chat|voice-mode)/.test(a);});"
-                + "if(candidates.length){candidates[candidates.length-1].click();return 'clicked';}"
-                + "var composer=document.querySelector('[data-testid*=composer]')||document.querySelector('form');"
-                + "if(composer){var near=all.filter(function(b){var a=label(b),r=b.getBoundingClientRect();"
-                + "return composer.contains(b)&&visible(b)&&!blocked.test(a)&&a.trim()==='voice'&&r.bottom>innerHeight*.55;});"
-                + "if(near.length){near[near.length-1].click();return 'clicked';}}"
-                + "return 'waiting';}catch(e){return 'error';}})()";
+                + "return r.width>0&&r.height>0&&st.display!=='none'&&st.visibility!=='hidden'"
+                + "&&st.opacity!=='0'&&!b.disabled&&b.getAttribute('aria-disabled')!=='true';};"
+                + "var label=function(b){return ((b.getAttribute('aria-label')||'')+' '+"
+                + "(b.getAttribute('title')||'')+' '+(b.getAttribute('data-testid')||'')+' '+"
+                + "(b.innerText||b.textContent||'')).toLowerCase().replace(/[-_]/g,' ');};"
+                + "var named=bs.filter(function(b){var t=label(b);return visible(b)"
+                + "&&/(start voice mode|voice mode|start voice conversation|voice conversation|voice chat)/.test(t)"
+                + "&&!/dictat|microphone|record|mute|stop voice|end voice|close voice/.test(t);});"
+                + "if(named.length){named[named.length-1].click();return 'clicked-labelled';}"
+                + "var editors=[].slice.call(document.querySelectorAll('textarea,[contenteditable=true],[role=textbox]'));"
+                + "editors=editors.filter(function(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0;});"
+                + "if(!editors.length)return 'no-composer';"
+                + "var ed=editors[editors.length-1],composer=ed.closest('form');"
+                + "if(!composer){var p=ed;for(var k=0;k<7&&p;k++,p=p.parentElement){"
+                + "var pr=p.getBoundingClientRect(),count=p.querySelectorAll('button,[role=button]').length;"
+                + "if(pr.width>Math.min(320,innerWidth*.45)&&count>=2){composer=p;break;}}}"
+                + "if(!composer)composer=ed.parentElement&&ed.parentElement.parentElement;"
+                + "if(!composer)return 'no-composer';var cr=composer.getBoundingClientRect();"
+                + "var near=bs.filter(function(b){var r=b.getBoundingClientRect();"
+                + "return visible(b)&&r.width>0&&r.height>0&&r.bottom>=cr.top-35&&r.top<=cr.bottom+35"
+                + "&&r.right<=cr.right+35&&r.left>=cr.left-20;});"
+                + "near=near.filter(function(b){return !/dictat|microphone|record|attach|upload|add files|search/.test(label(b));});"
+                + "if(!near.length)return 'no-voice-button';"
+                + "near.sort(function(x,y){return y.getBoundingClientRect().right-x.getBoundingClientRect().right;});"
+                + "var target=near[0],tr=target.getBoundingClientRect();"
+                + "if(tr.right<cr.left+cr.width*.68)return 'no-right-button';"
+                + "target.click();return 'clicked-rightmost-composer-button';"
+                + "}catch(e){return 'error';}})()";
         web.evaluateJavascript(js, result -> {
             if (result != null && result.contains("clicked")) {
-                Toast.makeText(this, "ChatGPT Live Voice start kiya.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "ChatGPT ka blue Live Voice button open kiya.", Toast.LENGTH_SHORT).show();
             } else {
-                speechHandler.postDelayed(() -> tryActivateLiveVoice(attempt + 1), 800);
+                speechHandler.postDelayed(() -> tryActivateLiveVoice(attempt + 1), 700);
             }
         });
     }

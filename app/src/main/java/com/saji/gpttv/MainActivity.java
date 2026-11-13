@@ -494,26 +494,42 @@ public class MainActivity extends Activity {
     private void readLatestAttempt(int attempt) {
         if (web == null || !browserOpen) return;
         String js = "(function(){try{"
-                + "var messages=[].slice.call(document.querySelectorAll('[data-message-author-role=assistant]'));"
-                + "if(!messages.length)return 'no-reply';var latest=messages[messages.length-1];"
-                + "var scope=latest.closest('[data-testid*=conversation-turn]')||latest.closest('article')||latest.parentElement||document;"
-                + "var label=function(b){return ((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')+' '+"
-                + "(b.getAttribute('data-testid')||'')+' '+(b.innerText||b.textContent||'')).toLowerCase();};"
+                + "var host=(location.hostname||'').toLowerCase();"
+                + "if(host!=='chatgpt.com'&&host!=='chat.openai.com')return 'not-chatgpt';"
+                + "var msgs=[].slice.call(document.querySelectorAll('[data-message-author-role=assistant]'));"
+                + "if(!msgs.length)return 'no-reply';var latest=msgs[msgs.length-1];"
+                + "var label=function(b){return ((b.getAttribute('aria-label')||'')+' '+"
+                + "(b.getAttribute('title')||'')+' '+(b.getAttribute('data-testid')||'')+' '+"
+                + "(b.innerText||b.textContent||'')).toLowerCase().replace(/[-_]/g,' ');};"
                 + "var visible=function(b){var r=b.getBoundingClientRect(),st=getComputedStyle(b);"
-                + "return r.width>0&&r.height>0&&st.visibility!=='hidden'&&st.display!=='none';};"
-                + "var match=[].slice.call(scope.querySelectorAll('button,[role=button]')).filter(function(b){"
-                + "return visible(b)&&/read\\\\s*aloud|read\\\\s*response|voice-play-turn-action-button|stop\\\\s*reading/.test(label(b));});"
-                + "if(!match.length){match=[].slice.call(document.querySelectorAll('button,[role=button]')).filter(function(b){"
-                + "return visible(b)&&/read\\\\s*aloud|voice-play-turn-action-button|stop\\\\s*reading/.test(label(b));});}"
-                + "if(!match.length)return 'not-found';match[match.length-1].click();return 'clicked';"
+                + "return r.width>0&&r.height>0&&st.display!=='none'&&st.visibility!=='hidden'&&st.opacity!=='0';};"
+                + "var scopes=[],p=latest;"
+                + "for(var k=0;k<7&&p;k++,p=p.parentElement){"
+                + "if(p.matches&&(p.matches('article')||p.matches('[data-testid*=conversation-turn]')||p.matches('[data-message-author-role=assistant]')))scopes.push(p);}"
+                + "scopes.push(latest.closest('article')||latest.parentElement||document);scopes.push(document);"
+                + "var seen=[],all=[];scopes.forEach(function(sc){[].slice.call(sc.querySelectorAll('button,[role=button]')).forEach(function(b){if(seen.indexOf(b)<0){seen.push(b);all.push(b);}});});"
+                + "var match=all.filter(function(b){var t=label(b);return visible(b)&&"
+                + "/read\\s*aloud|read\\s*response|voice play turn action button|stop\\s*reading|stop\\s*read\\s*aloud/.test(t);});"
+                + "if(!match.length){var speaker=all.filter(function(b){if(!visible(b))return false;"
+                + "var t=label(b),svg=b.querySelector('svg');if(/copy|share|thumb|feedback|more|edit|regenerate/.test(t))return false;"
+                + "if(/speaker|read|listen|audio|play/.test(t))return true;"
+                + "if(!svg)return false;var markup=(svg.outerHTML||'').toLowerCase();"
+                + "return /speaker|volume|audio|sound/.test(markup)||(/path/.test(markup)&&/(m3\\s*9|m3\\s*10|l7\\s*9|l7\\s*10|12\\s*5)/.test(markup));});"
+                + "if(speaker.length)match=speaker;}"
+                + "if(!match.length){var groups=[].slice.call(document.querySelectorAll('[data-testid*=conversation-turn],article'));"
+                + "var turn=groups.filter(function(g){return g.contains(latest);}).pop()||latest.parentElement;"
+                + "if(turn){var buttons=[].slice.call(turn.querySelectorAll('button,[role=button]')).filter(visible);"
+                + "var toolbar=buttons.filter(function(b){var t=label(b);return /copy|thumb|share|more|edit|read|listen/.test(t)||!!b.querySelector('svg');});"
+                + "if(toolbar.length>=4){var candidate=toolbar[2];if(candidate&&!/copy|thumb|share|more|edit/.test(label(candidate)))match=[candidate];else if(toolbar.length>=5)match=[toolbar[2]];}}}"
+                + "if(!match.length)return 'button-missing';match[match.length-1].click();return 'clicked';"
                 + "}catch(e){return 'error';}})()";
         web.evaluateJavascript(js, result -> {
             if (result != null && result.contains("clicked")) {
-                Toast.makeText(this, "ChatGPT Read Aloud start ho gaya.", Toast.LENGTH_SHORT).show();
-            } else if (attempt < 3) {
-                speechHandler.postDelayed(() -> readLatestAttempt(attempt + 1), 450);
+                Toast.makeText(this, "ChatGPT reply ka Read Aloud button press kiya.", Toast.LENGTH_SHORT).show();
+            } else if (attempt < 4) {
+                speechHandler.postDelayed(() -> readLatestAttempt(attempt + 1), 500);
             } else {
-                Toast.makeText(this, "Latest reply ka Read Aloud control nahi mila.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Reply toolbar ka speaker button detect nahi hua. ChatGPT page reload karke try karo.", Toast.LENGTH_LONG).show();
             }
         });
     }

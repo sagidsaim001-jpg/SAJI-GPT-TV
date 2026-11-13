@@ -13,7 +13,7 @@
     <application
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
-        android:label="SAJI GPT"
+        android:label="SAJI GPT TV"\n        android:icon="@drawable/ic_launcher"\n        android:roundIcon="@drawable/ic_launcher"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:hardwareAccelerated="true">
         <activity

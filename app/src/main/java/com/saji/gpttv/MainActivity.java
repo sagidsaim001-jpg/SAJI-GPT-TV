@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.pm.PackageManager;
 import android.content.Intent;
+import android.provider.Settings;
 import android.speech.RecognizerIntent;
 import android.speech.RecognitionListener;
 import android.speech.SpeechRecognizer;
@@ -42,11 +43,15 @@ import android.widget.Toast;
 public class MainActivity extends Activity {
     private static final String HOME_URL = "https://chatgpt.com/";
     private static final int REQ_MIC = 4107;
+    private static final String PREF_CHATGPT_MIC = "chatgpt_website_mic_allowed";
     private FrameLayout root;
     private LinearLayout rail;
     private WebView web;
     private boolean browserOpen = true;
     private PermissionRequest pendingPermission;
+    private boolean rememberWebsitePermission;
+    private boolean pendingSettingsMicEnable;
+    private TextView settingsButton;
     private View back, mic, live, speak, send, up, down, site, mobile;
     private TextView exit;
     private boolean railPressed;
@@ -152,6 +157,14 @@ public class MainActivity extends Activity {
             v.setNextFocusDownId(order[Math.min(order.length-1,i+1)].getId());
             v.setNextFocusRightId(View.NO_ID);
         }
+        settingsButton=new TextView(this);
+        settingsButton.setText("⚙"); settingsButton.setTextColor(Color.WHITE); settingsButton.setTextSize(22);
+        settingsButton.setGravity(Gravity.CENTER); settingsButton.setFocusable(true); settingsButton.setClickable(true);
+        settingsButton.setId(View.generateViewId()); settingsButton.setBackground(buttonBg(false,0xFF9B8CFF));
+        FrameLayout.LayoutParams sp=new FrameLayout.LayoutParams(dp(42),dp(38),Gravity.TOP|Gravity.END);
+        sp.topMargin=dp(12); sp.rightMargin=dp(94); root.addView(settingsButton,sp);
+        settingsButton.setOnFocusChangeListener((v,focused)->focusStyle(v,focused,0xFF9B8CFF));
+        settingsButton.setOnClickListener(v->showSettingsMenu());
         exit=new TextView(this);
         exit.setText("EXIT  ×");
         exit.setTextColor(Color.WHITE);
@@ -167,9 +180,9 @@ public class MainActivity extends Activity {
         root.addView(exit,ep);
         exit.setOnFocusChangeListener((v,f)->focusStyle(v,f,0xFFB9C8F8));
         exit.setOnClickListener(v -> finish());
-        exit.setNextFocusDownId(back.getId());
-        back.setNextFocusRightId(exit.getId());
-        exit.setNextFocusLeftId(back.getId());
+        exit.setNextFocusDownId(back.getId()); settingsButton.setNextFocusDownId(back.getId());
+        settingsButton.setNextFocusRightId(exit.getId()); exit.setNextFocusLeftId(settingsButton.getId());
+        back.setNextFocusRightId(settingsButton.getId());
     }
 
     private void addToRail(View v) {
@@ -258,18 +271,8 @@ public class MainActivity extends Activity {
             @Override public void onPageFinished(WebView v,String url){enterImmersive();super.onPageFinished(v,url);}
         });
         web.setWebChromeClient(new WebChromeClient(){
-            @Override public void onPermissionRequest(PermissionRequest request){
-                boolean audio=false;
-                for(String r:request.getResources()) if(PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r))audio=true;
-                if(!audio){request.deny();return;}
-                if(Build.VERSION.SDK_INT<23||checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){
-                    request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
-                } else {
-                    pendingPermission=request;
-                    requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQ_MIC);
-                }
-            }
-            @Override public void onPermissionRequestCanceled(PermissionRequest r){if(pendingPermission==r)pendingPermission=null;}
+            @Override public void onPermissionRequest(PermissionRequest request){runOnUiThread(()->handleWebsiteMicRequest(request));}
+            @Override public void onPermissionRequestCanceled(PermissionRequest r){if(pendingPermission==r){pendingPermission=null;rememberWebsitePermission=false;}}
         });
         FrameLayout.LayoutParams wp=new FrameLayout.LayoutParams(-1,-1);
         wp.leftMargin=dp(82);
@@ -594,14 +597,65 @@ public class MainActivity extends Activity {
         });
     }
 
+    private boolean hasAndroidMicPermission(){return Build.VERSION.SDK_INT<23||checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED;}
+    private boolean isChatGptWebsiteMicAllowed(){return getPreferences(MODE_PRIVATE).getBoolean(PREF_CHATGPT_MIC,false);}
+    private void showSettingsMenu(){
+        String[] items={"MICROPHONE PERMISSIONS","ANDROID APP PERMISSIONS","OPEN ANDROID APP SETTINGS","TEST MICROPHONE"};
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("SAJI GPT SETTINGS").setItems(items,(d,w)->{
+            if(w==0)showMicSettings();else if(w==1)showAndroidPermissionStatus();else if(w==2)openAndroidAppSettings();else activateMic();
+        }).setNegativeButton("CLOSE",null).create();
+        dialog.setOnShowListener(v->{if(dialog.getListView()!=null)dialog.getListView().requestFocus();});dialog.show();
+    }
+    private void showAndroidPermissionStatus(){
+        boolean allowed=hasAndroidMicPermission();
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("ANDROID APP PERMISSIONS")
+            .setMessage("SAJI GPT microphone permission: "+(allowed?"ALLOWED":"BLOCKED")+
+                "\n\nChatGPT website permission: "+(isChatGptWebsiteMicAllowed()?"ALLOWED":"NOT ALLOWED")+
+                "\n\nDono permissions allow honi zaroori hain. Android permission app ke liye hai, website permission ChatGPT ke liye.")
+            .setPositiveButton(allowed?"OK":"ALLOW",(d,w)->{if(!allowed)requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQ_MIC);})
+            .setNeutralButton("APP SETTINGS",(d,w)->openAndroidAppSettings()).setNegativeButton("CLOSE",null).create();dialog.show();
+    }
+    private void openAndroidAppSettings(){
+        try{startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,android.net.Uri.parse("package:"+getPackageName())));}
+        catch(Throwable error){try{startActivity(new Intent(Settings.ACTION_SETTINGS));}catch(Throwable ignored){Toast.makeText(this,"Android Settings open nahi hui.",Toast.LENGTH_LONG).show();}}
+    }
     private void showMicSettings(){
-        boolean granted=Build.VERSION.SDK_INT<23||checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED;
-        new AlertDialog.Builder(this).setTitle("SAJI GPT • MICROPHONE")
-            .setMessage("Android microphone permission: "+(granted?"ALLOWED":"NOT ALLOWED")+
-                "\n\nChatGPT website ko bhi apne browser prompt par microphone access allow karna hoga.")
-            .setPositiveButton(granted?"OK":"ALLOW",(d,w)->{
-                if(!granted&&Build.VERSION.SDK_INT>=23)requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQ_MIC);
-            }).setNegativeButton("CLOSE",null).show();
+        boolean androidAllowed=hasAndroidMicPermission(),siteAllowed=isChatGptWebsiteMicAllowed();
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("CHATGPT MICROPHONE")
+            .setMessage("Android app permission: "+(androidAllowed?"ALLOWED":"BLOCKED")+
+                "\nChatGPT website permission: "+(siteAllowed?"ALLOWED":"BLOCKED")+
+                "\n\nDono ON hone chahiye. Allow ke baad ChatGPT page reload karke Live/MIC try karo.")
+            .setPositiveButton("ALLOW MICROPHONE",(d,w)->{
+                pendingSettingsMicEnable=true;
+                if(!hasAndroidMicPermission())requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQ_MIC);
+                else{getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_CHATGPT_MIC,true).apply();pendingSettingsMicEnable=false;Toast.makeText(this,"ChatGPT website microphone allowed. Page reload karke try karo.",Toast.LENGTH_LONG).show();}
+            })
+            .setNeutralButton("BLOCK WEBSITE MIC",(d,w)->{
+                getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_CHATGPT_MIC,false).apply();
+                if(pendingPermission!=null){try{pendingPermission.deny();}catch(Throwable ignored){}pendingPermission=null;}
+                Toast.makeText(this,"ChatGPT website microphone blocked.",Toast.LENGTH_SHORT).show();
+            }).setNegativeButton("ANDROID SETTINGS",(d,w)->openAndroidAppSettings()).create();dialog.show();
+    }
+    private void handleWebsiteMicRequest(PermissionRequest request){
+        if(request==null)return;boolean audio=false,unsupported=false;
+        String[] resources=request.getResources();if(resources!=null)for(String resource:resources){if(PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource))audio=true;else unsupported=true;}
+        String origin=request.getOrigin()==null?"":request.getOrigin().toString().toLowerCase();
+        boolean trusted=origin.startsWith("https://chatgpt.com")||origin.startsWith("https://chat.openai.com");
+        if(!audio||unsupported||!trusted){try{request.deny();}catch(Throwable ignored){}return;}
+        if(!isChatGptWebsiteMicAllowed()){
+            new AlertDialog.Builder(this).setTitle("Allow ChatGPT microphone?")
+                .setMessage("ChatGPT wants to use the microphone. Allow it for future voice conversations?")
+                .setPositiveButton("ALLOW ONCE",(d,w)->allowPendingWebsiteMic(request,false))
+                .setNeutralButton("ALWAYS ALLOW",(d,w)->allowPendingWebsiteMic(request,true))
+                .setNegativeButton("BLOCK",(d,w)->{try{request.deny();}catch(Throwable ignored){}})
+                .setOnCancelListener(d->{try{request.deny();}catch(Throwable ignored){}}).show();return;
+        }
+        allowPendingWebsiteMic(request,true);
+    }
+    private void allowPendingWebsiteMic(PermissionRequest request,boolean remember){
+        if(!hasAndroidMicPermission()){pendingPermission=request;rememberWebsitePermission=remember;requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQ_MIC);return;}
+        if(remember)getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_CHATGPT_MIC,true).apply();
+        try{request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});}catch(Throwable ignored){}
     }
     private void toggleLayout(){
         mobileMode=!mobileMode;
@@ -630,17 +684,12 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(code,p,g);
         if(code==REQ_MIC){
             boolean granted=g!=null&&g.length>0&&g[0]==PackageManager.PERMISSION_GRANTED;
-            if(pendingPermission!=null){
-                PermissionRequest request=pendingPermission;
-                pendingPermission=null;
-                try { if(granted) request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE}); else request.deny(); }
-                catch(Throwable ignored) { }
+            if(pendingPermission!=null){PermissionRequest request=pendingPermission;pendingPermission=null;
+                try{if(granted){if(rememberWebsitePermission)getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_CHATGPT_MIC,true).apply();request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});}else request.deny();}catch(Throwable ignored){}
+                rememberWebsitePermission=false;
             }
-            if(manualMicPending){
-                manualMicPending=false;
-                if(granted) startNativeSpeechInput();
-                else Toast.makeText(this,"Microphone permission allow nahi hui.",Toast.LENGTH_LONG).show();
-            }
+            if(pendingSettingsMicEnable){pendingSettingsMicEnable=false;if(granted){getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_CHATGPT_MIC,true).apply();Toast.makeText(this,"Android aur ChatGPT website microphone permissions enabled. Page reload karo.",Toast.LENGTH_LONG).show();}else Toast.makeText(this,"Android microphone permission allow nahi hui.",Toast.LENGTH_LONG).show();}
+            if(manualMicPending){manualMicPending=false;if(granted)startNativeSpeechInput();else Toast.makeText(this,"Microphone permission allow nahi hui.",Toast.LENGTH_LONG).show();}
         }
     }
 
